@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DDNS MANAGER</title>
+    <style>
+        body { font-family: -apple-system, sans-serif; background: #f4f6f8; margin: 0; padding: 0; }
+        .hidden { display: none !important; }
+
+        /* OLD CSS */
+        .header { background: #fff; padding: 15px; position: sticky; top: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.05); z-index: 10; display: flex; justify-content: space-between; align-items: center; }
+        .header h3 { margin: 0; color: #333; font-size: 16px; }
+        .my-id-display { font-size: 12px; color: #666; background: #eee; padding: 4px 8px; border-radius: 4px; margin-right: 10px; }
+        select { padding: 8px; border-radius: 6px; border: 1px solid #ddd; }
+        .container { padding: 15px; padding-bottom: 80px; max-width: 600px; margin: 0 auto; }
+        .card { background: white; padding: 15px; margin-bottom: 10px; border-radius: 10px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .info strong { display: block; font-size: 15px; color: #2c3e50; }
+        .info span { font-size: 12px; color: #555; display: block; margin-top: 4px;}
+        .owner-tag { font-size: 11px; padding: 2px 5px; border-radius: 3px; font-weight: bold; margin-left: 5px; }
+        .mine { border-left: 5px solid #2ecc71; }
+        .mine .owner-tag { background: #e8f8f5; color: #27ae60; }
+        .others { border-left: 5px solid #bdc3c7; opacity: 0.8; }
+        .others .owner-tag { background: #f2f3f4; color: #7f8c8d; }
+        .btn-del { display: none; }
+        .mine .btn-del { display: block; background: #ffebee; color: #c62828; border: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+        .fab { position: fixed; bottom: 20px; right: 20px; width: 56px; height: 56px; background: #2980b9; color: white; border-radius: 50%; border: none; font-size: 28px; box-shadow: 0 4px 10px rgba(41, 128, 185, 0.4); cursor: pointer; }
+
+        /* SETUP & MODAL CSS */
+        dialog { border: none; border-radius: 12px; padding: 25px; width: 85%; max-width: 350px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+        dialog::backdrop { background: rgba(0,0,0,0.8); }
+        input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
+        .btn-primary { background: #2980b9; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; width: 100%; }
+
+        /* Setup Screen */
+        #setupScreen { position: fixed; top:0; left:0; width:100%; height:100%; background: #f4f6f8; z-index: 999; display: flex; align-items: center; justify-content: center; }
+        .setup-box { background: white; padding: 30px; border-radius: 12px; width: 90%; max-width: 400px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body>
+
+    <div id="setupScreen" class="hidden">
+        <div class="setup-box">
+            <h2 style="text-align:center; margin-top:0">INITIAL CONFIGURATION</h2>
+            <p style="font-size:13px; color:#666; text-align:center">Enter details to launch the App.</p>
+
+            <label style="font-size:12px; font-weight:bold">Node Name (Node ID)</label>
+            <input type="text" id="setId" placeholder="Ex: HOME-PC">
+
+            <label style="font-size:12px; font-weight:bold">Cloudflare Token</label>
+            <input type="password" id="setToken" placeholder="Enter API Token...">
+
+            <label style="font-size:12px; font-weight:bold">Port</label>
+            <input type="number" id="setPort" value="3000">
+
+            <button class="btn-primary" onclick="doSetup()">SAVE & RESTART APP</button>
+        </div>
+    </div>
+
+    <div id="mainApp" class="hidden">
+        <div class="header">
+            <div style="display:flex; align-items:center">
+                <h3>DDNS</h3>
+                <span id="currentIdDisplay" class="my-id-display" style="margin-left: 10px">...</span>
+            </div>
+            <select id="zoneSelect" onchange="loadRecords()"></select>
+        </div>
+
+        <div class="container" id="list"></div>
+        <button class="fab" onclick="openModal()">+</button>
+    </div>
+
+    <dialog id="addModal">
+        <h3>Add New Host</h3>
+        <input type="text" id="hostInput" placeholder="Subdomain (ex: camera)...">
+        <div style="display:flex; gap:10px; justify-content:flex-end">
+            <button onclick="document.getElementById('addModal').close()" style="background:none; border:none; cursor:pointer">Cancel</button>
+            <button class="btn-primary" style="width:auto" onclick="addDDNS()">Save</button>
+        </div>
+    </dialog>
+
+    <script>
+        // CHECK STATUS ON LOAD
+        async function checkStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+
+                if (data.configured) {
+                    // Configured -> Show Main App
+                    document.getElementById('mainApp').classList.remove('hidden');
+                    document.getElementById('currentIdDisplay').innerText = `ID: ${data.id}`;
+                    initData();
+                } else {
+                    // Not Configured -> Show Setup Screen
+                    document.getElementById('setupScreen').classList.remove('hidden');
+                }
+            } catch (e) { alert("Server Connection Error!"); }
+        }
+
+        async function doSetup() {
+            const id = document.getElementById('setId').value;
+            const token = document.getElementById('setToken').value;
+            const port = document.getElementById('setPort').value;
+            if(!id || !token) return alert("Missing Input!");
+
+            const res = await fetch('/api/setup', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({ id, token, port })
+            });
+            const d = await res.json();
+            alert(d.message);
+            if(d.success) window.close();
+        }
+
+        let zonesMap = {};
+        async function initData() {
+            try {
+                const res = await fetch('/api/zones');
+                const json = await res.json();
+                const select = document.getElementById('zoneSelect');
+                select.innerHTML = '';
+                json.data.forEach(z => {
+                    zonesMap[z.id] = z.name;
+                    select.innerHTML += `<option value="${z.id}">${z.name}</option>`;
+                });
+                if(json.data.length > 0) loadRecords();
+            } catch(e) { alert("Load Error (Invalid Token?)"); }
+        }
+
+        async function loadRecords() {
+            const zoneId = document.getElementById('zoneSelect').value;
+            const listDiv = document.getElementById('list');
+            listDiv.innerHTML = '<p style="text-align:center; color:#999">Loading...</p>';
+
+            const res = await fetch(`/api/records?zoneId=${zoneId}`);
+            const json = await res.json();
+
+            if(!json.data || json.data.length === 0) { listDiv.innerHTML = '<p style="text-align:center">Empty.</p>'; return; }
+
+            listDiv.innerHTML = json.data.map(r => `
+                <div class="card ${r.isMine ? 'mine' : 'others'}">
+                    <div class="info">
+                        <strong>${r.name} <span class="owner-tag">${r.ownerId}</span></strong>
+                        <span>IP: ${r.content}</span>
+                    </div>
+                    ${r.isMine ? `<button class="btn-del" onclick="deleteRecord('${r.id}')">DELETE</button>` : ''}
+                </div>
+            `).join('');
+        }
+
+        function openModal() { document.getElementById('hostInput').value=''; document.getElementById('addModal').showModal(); }
+
+        async function addDDNS() {
+            const zoneId = document.getElementById('zoneSelect').value;
+            const host = document.getElementById('hostInput').value.trim();
+            if(!host) return alert('Enter a name!');
+
+            document.getElementById('addModal').close();
+            document.getElementById('list').innerHTML = '<p style="text-align:center">Processing...</p>';
+
+            const res = await fetch('/api/update', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ zoneId, zoneName: zonesMap[zoneId], subdomain: host })
+            });
+            const result = await res.json();
+            alert(result.message);
+            loadRecords();
+        }
+
+        async function deleteRecord(id) {
+            if(!confirm("Are you sure you want to delete this record?")) return;
+            await fetch('/api/delete', {
+                method: 'DELETE', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ zoneId: document.getElementById('zoneSelect').value, recordId: id })
+            });
+            loadRecords();
+        }
+
+        checkStatus();
+    </script>
+</body>
+</html>
