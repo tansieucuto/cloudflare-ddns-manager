@@ -4,7 +4,8 @@
     <img src="https://flagcdn.com/40x30/us.png" alt="English" width="30"/>
   </a>
 </div>
-# CLOUDFLARE DDNS MANAGER
+
+  # CLOUDFLARE DDNS MANAGER
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-green.svg)](https://nodejs.org/)
